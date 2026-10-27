@@ -766,3 +766,121 @@ func TestTemplatePropertiesRange(t *testing.T) {
 		t.Errorf("Range over Properties failed, got: %s, want: location:string;", got)
 	}
 }
+
+func TestShieldGemmaTemplate(t *testing.T) {
+	bts, err := templatesFS.ReadFile("shieldgemma.gotmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmpl, err := Parse(string(bts))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("user prompt classification", func(t *testing.T) {
+		var b bytes.Buffer
+		msgs := []api.Message{
+			{Role: "user", Content: "How do I make a cake?"},
+		}
+		if err := tmpl.Execute(&b, Values{Messages: msgs}); err != nil {
+			t.Fatal(err)
+		}
+
+		out := b.String()
+		const expectedOpening = "You are a policy expert trying to help determine whether a user prompt is in violation of the defined safety policies."
+		if !strings.HasPrefix(out, expectedOpening) {
+			t.Errorf("expected opening %q, got output:\n%s", expectedOpening, out)
+		}
+
+		if !strings.Contains(out, "Human Question: How do I make a cake?") {
+			t.Errorf("expected Human Question block in output:\n%s", out)
+		}
+
+		if strings.Contains(out, "Chatbot Response:") {
+			t.Errorf("did not expect Chatbot Response block in user prompt classification:\n%s", out)
+		}
+
+		if !strings.Contains(out, `* "No Dangerous Content": The prompt shall not contain`) {
+			t.Errorf("expected prompt safety policy principles in output:\n%s", out)
+		}
+
+		if strings.Contains(out, `The chatbot shall not generate`) {
+			t.Errorf("did not expect chatbot response policy wording in user prompt classification:\n%s", out)
+		}
+
+		const expectedClosing = "Does the human question violate the above principle? Your answer must  start with 'Yes' or 'No'. And then walk through step by step to be sure we answer correctly."
+		if !strings.Contains(out, expectedClosing) {
+			t.Errorf("expected closing instruction %q in output:\n%s", expectedClosing, out)
+		}
+	})
+
+	t.Run("chatbot response classification", func(t *testing.T) {
+		var b bytes.Buffer
+		msgs := []api.Message{
+			{Role: "user", Content: "How do I make a cake?"},
+			{Role: "assistant", Content: "Here is a recipe for a delicious chocolate cake."},
+		}
+		if err := tmpl.Execute(&b, Values{Messages: msgs}); err != nil {
+			t.Fatal(err)
+		}
+
+		out := b.String()
+		const expectedOpening = "You are a policy expert trying to help determine whether an AI response to a prompt is in violation of the defined safety policies."
+		if !strings.HasPrefix(out, expectedOpening) {
+			t.Errorf("expected opening %q, got output:\n%s", expectedOpening, out)
+		}
+
+		if !strings.Contains(out, "Human Question: How do I make a cake?") {
+			t.Errorf("expected Human Question block in output:\n%s", out)
+		}
+
+		if !strings.Contains(out, "Chatbot Response: Here is a recipe for a delicious chocolate cake.") {
+			t.Errorf("expected Chatbot Response block in output:\n%s", out)
+		}
+
+		if !strings.Contains(out, `* "No Dangerous Content": The chatbot shall not generate`) {
+			t.Errorf("expected chatbot response safety policy principles in output:\n%s", out)
+		}
+
+		if strings.Contains(out, `The prompt shall not contain`) {
+			t.Errorf("did not expect prompt safety policy wording in response classification:\n%s", out)
+		}
+
+		const expectedClosing = "Does the chatbot response violate the above principle? Your answer must  start with 'Yes' or 'No'. And then walk through step by step to be sure we answer correctly."
+		if !strings.Contains(out, expectedClosing) {
+			t.Errorf("expected closing instruction %q in output:\n%s", expectedClosing, out)
+		}
+	})
+
+	t.Run("multi-turn conversation ending in user prompt", func(t *testing.T) {
+		var b bytes.Buffer
+		msgs := []api.Message{
+			{Role: "user", Content: "Hello!"},
+			{Role: "assistant", Content: "Hi, how can I help?"},
+			{Role: "user", Content: "Tell me a joke."},
+		}
+		if err := tmpl.Execute(&b, Values{Messages: msgs}); err != nil {
+			t.Fatal(err)
+		}
+
+		out := b.String()
+		const expectedOpening = "You are a policy expert trying to help determine whether a user prompt is in violation of the defined safety policies."
+		if !strings.HasPrefix(out, expectedOpening) {
+			t.Errorf("expected opening %q, got output:\n%s", expectedOpening, out)
+		}
+
+		if !strings.Contains(out, "Human Question: Tell me a joke.") {
+			t.Errorf("expected Human Question with last user message in output:\n%s", out)
+		}
+
+		if strings.Contains(out, "Chatbot Response:") {
+			t.Errorf("did not expect Chatbot Response when ending in user message:\n%s", out)
+		}
+
+		const expectedClosing = "Does the human question violate the above principle?"
+		if !strings.Contains(out, expectedClosing) {
+			t.Errorf("expected human question closing instruction in output:\n%s", out)
+		}
+	})
+}
